@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+
+models/
+results/
+input_videos/
+demo-frames/
+
+*.mp4
+*.mov
+*.avi
+*.pth
+*.pt
+
+*.csv
+*.npy
+*.npz
