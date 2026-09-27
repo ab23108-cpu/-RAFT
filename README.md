@@ -1,80 +1,105 @@
-# RAFT
-This repository contains the source code for our paper:
+# サッカー映像に対するRAFTを用いたブレ補正
 
-[RAFT: Recurrent All Pairs Field Transforms for Optical Flow](https://arxiv.org/pdf/2003.12039.pdf)<br/>
-ECCV 2020 <br/>
-Zachary Teed and Jia Deng<br/>
+## 概要
 
-<img src="RAFT.png">
+本リポジトリは，サッカー映像に残るカメラ由来のブレを補正するためのプログラムである。
 
-## Requirements
-The code has been tested with PyTorch 1.6 and Cuda 10.1.
-```Shell
-conda create --name raft
-conda activate raft
-conda install pytorch=1.6.0 torchvision=0.7.0 cudatoolkit=10.1 matplotlib tensorboard scipy opencv -c pytorch
-```
+本研究では，スマートフォンや三脚で撮影したアマチュアサッカー映像を対象とし，選手追跡を行う前処理として映像のブレ補正を行うことを目的とする。
 
-## Demos
-Pretrained models can be downloaded by running
-```Shell
-./download_models.sh
-```
-or downloaded from [google drive](https://drive.google.com/drive/folders/1sWDsfuZ3Up38EUQt7-JDTT1HcGHuJgvT?usp=sharing)
+## 研究目的
 
-You can demo a trained model on a sequence of frames
-```Shell
-python demo.py --model=models/raft-things.pth --path=demo-frames
-```
+サッカー映像では，風や手ブレ，三脚の揺れなどにより，映像全体にブレが発生することがある。  
+このようなブレは，選手の検出位置を不安定にし，トラッキング精度を低下させる可能性がある。
 
-## Required Data
-To evaluate/train RAFT, you will need to download the required datasets. 
-* [FlyingChairs](https://lmb.informatik.uni-freiburg.de/resources/datasets/FlyingChairs.en.html#flyingchairs)
-* [FlyingThings3D](https://lmb.informatik.uni-freiburg.de/resources/datasets/SceneFlowDatasets.en.html)
-* [Sintel](http://sintel.is.tue.mpg.de/)
-* [KITTI](http://www.cvlibs.net/datasets/kitti/eval_scene_flow.php?benchmark=flow)
-* [HD1K](http://hci-benchmark.iwr.uni-heidelberg.de/) (optional)
+そこで本研究では，選手追跡の前段階として，撮影映像に含まれるブレを検出し，補正する手法を検討する。
 
+## 現在の処理手順
 
-By default `datasets.py` will search for the datasets in these locations. You can create symbolic links to wherever the datasets were downloaded in the `datasets` folder
+現在の処理は，以下のSTEPで構成される。
 
-```Shell
-├── datasets
-    ├── Sintel
-        ├── test
-        ├── training
-    ├── KITTI
-        ├── testing
-        ├── training
-        ├── devkit
-    ├── FlyingChairs_release
-        ├── data
-    ├── FlyingThings3D
-        ├── frames_cleanpass
-        ├── frames_finalpass
-        ├── optical_flow
-```
+1. Farneback Optical Flow によるブレ特徴量の抽出
+2. ブレ区間の検出
+3. ブレ区間に含まれるフレームの抽出
+4. RAFT による Optical Flow 推定
+5. 背景領域のFlowからTranslation量を推定
+6. 推定したズレと逆方向へのTranslation補正
+7. 補正済みフレームを元動画へ合成
 
-## Evaluation
-You can evaluate a trained model using `evaluate.py`
-```Shell
-python evaluate.py --model=models/raft-things.pth --dataset=sintel --mixed_precision
-```
+## STEP1: ブレ特徴量の抽出
 
-## Training
-We used the following training schedule in our paper (2 GPUs). Training logs will be written to the `runs` which can be visualized using tensorboard
-```Shell
-./train_standard.sh
-```
+まず，入力動画に対してFarneback Optical Flowを用い，隣接フレーム間の動きを推定する。  
+全フレームに対してRAFTを適用すると計算負荷が大きいため，ブレ区間の候補を抽出する段階ではFarneback Optical Flowを用いる。
 
-If you have a RTX GPU, training can be accelerated using mixed precision. You can expect similiar results in this setting (1 GPU)
-```Shell
-./train_mixed.sh
-```
+この段階では，芝生の色情報を背景情報として利用し，芝生領域における移動量を求める。  
+また，平均値ではなく中央値を用いることで，選手やボールなどの局所的な動きの影響を抑える。
 
-## (Optional) Efficent Implementation
-You can optionally use our alternate (efficent) implementation by compiling the provided cuda extension
-```Shell
-cd alt_cuda_corr && python setup.py install && cd ..
-```
-and running `demo.py` and `evaluate.py` with the `--alternate_corr` flag Note, this implementation is somewhat slower than all-pairs, but uses significantly less GPU memory during the forward pass.
+## STEP2: ブレ区間の検出
+
+STEP1で得られたフレームごとの移動量や鮮明度情報をもとに，ブレが発生している可能性のある区間を検出する。  
+連続してブレと判定されたフレームをまとめ，補正対象となるブレ区間として抽出する。
+
+## STEP3: フレーム抽出
+
+STEP2で検出したブレ区間に含まれるフレームを動画から抽出する。  
+抽出したフレームは，RAFTによるOptical Flow推定の入力として使用する。
+
+## STEP4: RAFTによるOptical Flow推定
+
+検出されたブレ区間に対して，RAFTを用いて隣接フレーム間のOptical Flowを推定する。  
+RAFTは，各画素が次のフレームにおいてどの方向にどれだけ移動したかを推定する手法である。
+
+本研究では，RAFTの出力を最終結果として用いるのではなく，カメラ由来のブレを推定するための移動量情報として利用する。
+
+## STEP5: Translation量の推定
+
+RAFTによって得られたOptical Flowから，背景領域の移動量を推定する。  
+現在の実装では，芝生領域を背景情報として利用し，その領域内のFlowの中央値を代表値として用いる。
+
+これにより，選手やボールなどの局所的な動きの影響を抑えながら，フレーム間の移動量 `tx, ty` を推定する。
+
+## STEP6: Translation補正
+
+STEP5で推定した移動量 `tx, ty` に対して，フレームを逆方向 `-(tx, ty)` に平行移動する。  
+これにより，カメラ由来のブレ成分を打ち消す。
+
+補正にはOpenCVの `cv2.warpAffine()` を用いる。
+
+## STEP7: 動画合成
+
+補正したフレームを元動画の該当フレームと差し替え，補正後の動画を出力する。
+
+## 評価
+
+補正前後の映像に対して，平均移動量，軌跡揺れ量，急なジャンプ量などを比較し，ブレ低減率を算出する。
+
+これにより，補正処理によって映像中のブレがどの程度低減されたかを評価する。
+
+## 主なファイル構成
+
+```text
+step1.py
+    Farneback Optical Flowによるブレ特徴量抽出
+
+step2.py
+    ブレ区間の検出
+
+step3.py
+    ブレ区間のフレーム抽出
+
+step4_raft.py
+    RAFTによるOptical Flow推定
+
+step4_visualize_flow.py
+    RAFT Flowの可視化
+
+step7_composite.py
+    補正済みフレームの動画合成
+
+hosei houhou/translate/test_pipeline_1_7_translation.py
+    STEP1からSTEP7までを実行するメインパイプライン
+
+hosei houhou/translate/step5_translation.py
+    RAFT FlowからTranslation量を推定
+
+hosei houhou/translate/step6_stabilize_translation.py
+    Translation補正を実行
