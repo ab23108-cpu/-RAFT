@@ -67,21 +67,28 @@ def resolve_video_path(filename, keyword):
         if path.exists():
             return path
 
+    # 固定ファイル名が古い場合は、results/mp4 と results 直下から
+    # 最新の Translation 補正動画を自動で選ぶ。
     keyword_candidates = sorted(
-        MP4_DIR.glob(f"*{keyword}*.mp4")
+        list(MP4_DIR.glob(f"*{keyword}*.mp4"))
+        + list(RESULTS_DIR.glob(f"*{keyword}*.mp4")),
+        key=lambda p: p.stat().st_mtime
     )
 
     if len(keyword_candidates) > 0:
         selected = keyword_candidates[-1]
-        print(f"指定動画が見つからないため代わりに使用: {selected}")
+        print(f"指定動画が見つからないため最新の補正動画を使用: {selected}")
         return selected
 
-    available_mp4 = sorted(MP4_DIR.glob("*.mp4"))
+    available_mp4 = sorted(
+        list(MP4_DIR.glob("*.mp4"))
+        + list(RESULTS_DIR.glob("*.mp4")),
+        key=lambda p: p.stat().st_mtime
+    )
 
-    print("\n===== results/mp4 内のmp4一覧 =====")
+    print("\n===== results/mp4 と results 直下のmp4一覧 =====")
     for p in available_mp4:
-        print(p.name)
-
+        print(p)
     raise FileNotFoundError(
         f"評価対象動画が見つかりません: {filename}"
     )

@@ -1,4 +1,4 @@
-import sys
+﻿import sys
 import os
 import numpy as np
 import cv2
@@ -160,6 +160,14 @@ max_correction_px = 0.3
 
 raft_iters = 16
 
+# 人物除外版の設定
+# YOLOv8x + BoT-SORTで検出したperson領域を、STEP1とSTEP5の背景Flow推定から除外する。
+use_person_detection = True
+yolo_model_name = "yolov8x.pt"
+yolo_conf = 0.25
+yolo_iou = 0.5
+person_bbox_expand_ratio = 0.15
+
 # Noneなら全flow画像を保存する
 flow_visualize_count = None
 
@@ -168,6 +176,23 @@ os.makedirs("results", exist_ok=True)
 total_start = time.time()
 
 
+
+person_detector = None
+
+if use_person_detection:
+    person_detector = PersonMaskYOLO(
+        model_name=yolo_model_name,
+        conf=yolo_conf,
+        iou=yolo_iou,
+        bbox_expand_ratio=person_bbox_expand_ratio,
+        use_tracking=True,
+        tracker="botsort.yaml"
+    )
+
+    print("YOLO人物検出: 使用")
+    print(f"YOLO model: {yolo_model_name}")
+else:
+    print("YOLO人物検出: 未使用")
 print("\n===== STEP1 ブレ特徴量抽出 =====")
 
 step_start = time.time()
@@ -175,6 +200,8 @@ step_start = time.time()
 step1 = Step1MotionBlurDetector(
     resize_width=640,
     use_grass_mask=True,
+    use_person_mask=use_person_detection,
+    person_detector=person_detector,
     use_median=True,
     green_lower=(30, 40, 40),
     green_upper=(90, 255, 255),
@@ -345,7 +372,9 @@ step5 = Step5TranslationEstimator(
     min_points=translation_min_points,
     green_lower=translation_green_lower,
     green_upper=translation_green_upper,
-    use_grass_mask=translation_use_grass_mask
+    use_grass_mask=translation_use_grass_mask,
+    use_person_mask=use_person_detection,
+    person_detector=person_detector
 )
 
 translations_dict = step5.estimate_translations(
